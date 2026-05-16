@@ -53,6 +53,7 @@ bin/install-skills --dry-run             # preview without changes
 bin/install-skills brainstorming foo     # install specific skills by name
 bin/uninstall-skills                     # remove all symlinks for known skills
 bin/uninstall-skills --scope work        # remove only one scope
+bin/doctor                               # check local setup without changes
 ```
 
 The script creates symlinks at `~/.claude/skills/<skill>` pointing into this repo. Output is one line per skill: `identical`, `linked`, `relinked`, `unlinked`, `skipped`, or `warning`.

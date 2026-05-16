@@ -1,0 +1,12 @@
+CommitMsg:
+  ALL:
+    enabled: false
+
+PreCommit:
+  ALL:
+    enabled: false
+
+  AuthorEmail:
+    enabled: true
+    required: true
+    pattern: '\Ayaodong\.dev@gmail\.com\z'
