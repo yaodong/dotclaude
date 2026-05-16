@@ -67,9 +67,10 @@ def start_impl(topic: str) -> dict:
 def start(topic: str = "") -> dict:
     """Start a fresh Cursor critique chat for a new task.
 
-    Use when the user runs /converge-start. Creates a Cursor chat, seeds the
-    review contract, and confirms Cursor acknowledges. Returns ok=False if a
-    session is already active or if Cursor doesn't acknowledge the seed.
+    Use when the user asks for a Cursor review and no session is active.
+    Creates a Cursor chat, seeds the review contract, and confirms Cursor
+    acknowledges. Returns ok=False if a session is already active or if
+    Cursor doesn't acknowledge the seed.
     """
     return start_impl(topic)
 
@@ -81,17 +82,17 @@ def iterate_impl(message: str, files: list[str]) -> dict:
     except state.StateCorrupt as e:
         return {
             "status": "error",
-            "reply": f"state file corrupted, run /converge-end then /converge-start: {e}",
+            "reply": f"state file corrupted, call converge.end then converge.start: {e}",
         }
     if current is None:
         return {
             "status": "no_session",
-            "reply": "no active converge session; run /converge-start first",
+            "reply": "no active converge session; call converge.start first",
         }
     if current.round_count >= MAX_ROUNDS:
         return {
             "status": "limit_reached",
-            "reply": f"{MAX_ROUNDS}-round cap reached; run /converge-end then /converge-start to continue",
+            "reply": f"{MAX_ROUNDS}-round cap reached; call converge.end then converge.start to continue",
             "round": current.round_count,
         }
 

@@ -1,4 +1,4 @@
-"""Builds the seed prompt sent to Cursor at /converge-start."""
+"""Builds the seed prompt sent to Cursor when a converge session starts."""
 from __future__ import annotations
 
 _TEMPLATE = """\

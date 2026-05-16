@@ -1,6 +1,6 @@
 ---
 name: converge
-description: "Critique-loop with Cursor's agent CLI as a read-only second-agent reviewer across spec → plan → code phases. Use when the user invokes /converge-start, /converge-status, or /converge-end, or asks for Cursor's review on an artifact."
+description: "Critique-loop with Cursor's agent CLI as a read-only second-agent reviewer across spec → plan → code phases. Use when the user asks for Cursor's review on an artifact, asks about the current converge session, or wants to end the session."
 ---
 
 # converge
@@ -9,18 +9,55 @@ Critique-loop with Cursor's `agent` CLI as a read-only second-agent reviewer. Us
 
 ## When to use
 
-- The user has invoked `/converge-start`, `/converge-status`, or `/converge-end`.
-- The user explicitly asks "have Cursor review this" or similar.
+- The user explicitly asks "have Cursor review this", "get a second opinion from Cursor", or similar.
 - An artifact (spec, plan, code file) is ready for cross-agent critique and a converge session is active.
+- The user asks about session state ("what round are we on?", "is converge running?") — call `status`.
+- The user signals they're done ("we're done with converge", "end the session", "reset the converge state") — call `end`.
 
-Do **not** invoke converge for chitchat, casual questions, or anything that isn't an artifact-level review request. The tool spawns a real Cursor agent process and consumes round budget.
+Do **not** invoke `start` or `iterate` for chitchat, casual questions, or speculative reviews — they spawn a real Cursor agent process and consume round budget. `status` and `end` are cheap and safe to call any time.
 
 ## Tools
 
-- **`converge.start(topic)`** — start a fresh Cursor chat. Use only when responding to `/converge-start`.
-- **`converge.iterate(message, files)`** — submit one critique round. `files` is a list of absolute paths Cursor should read. Returns `{status, reply, round}`.
-- **`converge.status()`** — report session state. Use for `/converge-status`.
-- **`converge.end()`** — close the session. Use for `/converge-end`.
+All four are MCP tools the user invokes through natural language — there are no slash commands.
+
+- **`converge.start(topic)`** — start a fresh Cursor chat. If `topic` is unclear, ask the user once before starting; don't invent one.
+- **`converge.iterate(message, files)`** — submit one critique round. `files` is a list of absolute paths Cursor should read. Returns `{status, reply, round}` for active-session statuses; the `error` (corrupt state) and `no_session` branches return `{status, reply}` only.
+- **`converge.status()`** — report session state.
+- **`converge.end()`** — close the session. Idempotent and safe; also the escape hatch when state is corrupt.
+
+### Decision flow when the user asks for a review
+
+1. Call `status`. If `no_session`, call `start(topic)`. If `state_corrupt`, call `end` to clear, then `start`.
+2. Once a session is active, revise the artifact (or stage the file the user wants reviewed), then call `iterate(message, files)`.
+3. Loop on `iterate` per "Reading the reply" below until `STATUS: APPROVED` or you hit a stop condition in "Critical behavior rules."
+
+Do not skip `status` and call `iterate` directly — that returns `no_session` and wastes a round of the user's attention.
+
+### How to handle each tool's response
+
+**`start` returns** `{ok, ...}`:
+
+- `ok: true` → tell the user the session_id and confirm Cursor acknowledged the contract.
+- `ok: false, reason: "session_active"` → a session is already active; show its session_id and ask whether to end it first.
+- `ok: false, reason: "seed_not_acknowledged"` → show Cursor's `reply` verbatim. Do not auto-retry — the user decides whether to retry or investigate.
+- `ok: false, reason: "state_corrupt"` → state file is corrupt; show `error`; suggest ending the session to clear it before retrying.
+- `ok: false, reason: "agent_cli_error"` → show `error`; the `agent` CLI failed. Common causes: missing from PATH, network/auth, or Cursor workspace-trust not granted (`error` will say "Workspace Trust Required"). The trust prompt is interactive and can't be answered via MCP — tell the user to open a real terminal, `cd` to the directory, run `agent`, accept the prompt, and exit. Trust persists per-directory after that. Do not auto-retry.
+- Any other `ok: false` → show the full response and ask how to proceed.
+
+**`iterate` returns** `{status, reply, round}` for active-session statuses; the `error` (corrupt state) and `no_session` branches return `{status, reply}` only. See "Reading the reply" below.
+
+**`status` returns** `{ok, ...}`:
+
+- `ok: true` → report compactly: session_id, round_count (out of 30), started_at, last_status, transcript_path (or `transcript_note` if path is null).
+- `ok: false, reason: "no_session"` → say "No active converge session" plainly.
+- `ok: false, reason: "state_corrupt"` → state is corrupt; show `error`; suggest ending to clear it.
+- Any other `ok: false` → show the full response.
+
+**`end` returns** `{ok: true, ...}` (always). Distinguish three cases:
+
+- `ended_session_id: <id>` present → confirm the session ended; show the id, and mention the Cursor chat is preserved in Cursor's storage and resumable via `agent --resume <id>`.
+- `no_session: true` → say "No active converge session to end." Don't mention resume — there was no chat.
+- `cleared_corrupt_state: true` → tell the user the state file was corrupt and has been cleared. The underlying Cursor chat (if any) may still exist in Cursor's storage but the server can't tell you the id; if they have it from earlier, they can `agent --resume <id>` manually.
 
 ## How to call iterate
 
@@ -37,7 +74,7 @@ Format follows the content. A single one-line fix gets a one-line message. A mul
 
 ## Reading the reply
 
-`iterate` returns `{status, reply, round}`. Behavior by status:
+`iterate` returns `{status, reply, round}` for active-session statuses; the `error` (corrupt state) and `no_session` branches return `{status, reply}` only. Behavior by status:
 
 - **`approved`** → move on. The artifact is good as-is.
 - **`changes_requested`** → revise the file, then call `iterate` again with a message describing what changed.
