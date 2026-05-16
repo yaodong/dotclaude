@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# Symlink config files from this repo into ~/.claude/
+#
+# Behavior:
+#   - Reads scopes from config.json (top-level "configs" object).
+#   - With no --scope: installs the union of all scopes.
+#   - With --scope <name>: installs only that scope, AND removes existing
+#     symlinks (pointing into this repo) for files NOT in that scope.
+#   - If target exists and is NOT a symlink: backs it up to <name>.bak.<ts>
+#     before linking.
+#
+# Output: one concise line per file — identical / linked / relinked / unlinked
+#                                    / backed-up.
+#
+# Requires: jq
+#
+# Usage:
+#   bin/install-config                          install all scopes
+#   bin/install-config --scope personal         install only "personal" scope
+#   bin/install-config --scope work             install only "work" scope
+#   bin/install-config --dry-run                preview without changes
+#   bin/install-config CLAUDE.md                install specific files (override)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CONFIG_SRC="$REPO_ROOT/home"
+CONFIG_DST="$HOME/.claude"
+CONFIG="$REPO_ROOT/config.json"
+
+dry_run=false
+scope=""
+selected=()
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required. Install with: brew install jq" >&2
+  exit 1
+fi
+
+if [ ! -f "$CONFIG" ]; then
+  echo "error: config.json not found at $CONFIG" >&2
+  exit 1
+fi
+
+if [ ! -d "$CONFIG_SRC" ]; then
+  echo "error: source directory not found at $CONFIG_SRC" >&2
+  exit 1
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=true; shift ;;
+    --scope)
+      [ $# -ge 2 ] || { echo "error: --scope requires a name" >&2; exit 2; }
+      scope="$2"; shift 2 ;;
+    -h|--help)
+      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    -*)
+      echo "unknown flag: $1" >&2; exit 2 ;;
+    *)
+      selected+=("$1"); shift ;;
+  esac
+done
+
+# Decide which files to install.
+in_scope=()
+if [ "${#selected[@]}" -gt 0 ]; then
+  in_scope=("${selected[@]}")
+elif [ -n "$scope" ]; then
+  if ! jq -e --arg s "$scope" '.configs | has($s)' "$CONFIG" >/dev/null; then
+    echo "error: scope '$scope' not in config.json .configs" >&2
+    exit 2
+  fi
+  while IFS= read -r name; do
+    in_scope+=("$name")
+  done < <(jq -r --arg s "$scope" '.configs[$s][]' "$CONFIG")
+else
+  while IFS= read -r name; do
+    in_scope+=("$name")
+  done < <(jq -r '[.configs[][]] | unique | .[]' "$CONFIG")
+fi
+
+# Build set of "managed" config files across all scopes — used to decide which
+# existing symlinks should be removed when a narrower scope is requested.
+managed_all=()
+while IFS= read -r name; do
+  managed_all+=("$name")
+done < <(jq -r '[.configs[][]] | unique | .[]' "$CONFIG")
+
+run() {
+  if $dry_run; then
+    echo "  [dry-run] $*"
+  else
+    eval "$@"
+  fi
+}
+
+contains() {
+  local needle="$1"; shift
+  local item
+  for item in "$@"; do
+    [ "$item" = "$needle" ] && return 0
+  done
+  return 1
+}
+
+mkdir -p "$CONFIG_DST"
+
+# Phase 1: install / relink each requested config file.
+for name in "${in_scope[@]+"${in_scope[@]}"}"; do
+  src="$CONFIG_SRC/$name"
+  dst="$CONFIG_DST/$name"
+
+  if [ ! -f "$src" ]; then
+    echo "missing  $name (not in repo)"
+    continue
+  fi
+
+  if [ -L "$dst" ]; then
+    current_target="$(readlink "$dst")"
+    if [ "$current_target" = "$src" ]; then
+      echo "identical $name"
+      continue
+    fi
+    run "rm \"$dst\""
+    run "ln -s \"$src\" \"$dst\""
+    echo "relinked $name"
+    continue
+  fi
+
+  if [ -e "$dst" ]; then
+    ts="$(date +%Y%m%d-%H%M%S)"
+    backup="$dst.bak.$ts"
+    run "mv \"$dst\" \"$backup\""
+    echo "backed-up $name -> $(basename "$backup")"
+    run "ln -s \"$src\" \"$dst\""
+    echo "linked   $name"
+    continue
+  fi
+
+  run "ln -s \"$src\" \"$dst\""
+  echo "linked   $name"
+done
+
+# Phase 2: when a scope is given (and we're not running by-name), remove
+# symlinks for managed configs that fell out of this scope.
+if [ -n "$scope" ] && [ "${#selected[@]}" -eq 0 ]; then
+  for name in "${managed_all[@]}"; do
+    contains "$name" "${in_scope[@]+"${in_scope[@]}"}" && continue
+    dst="$CONFIG_DST/$name"
+    [ -L "$dst" ] || continue
+    current_target="$(readlink "$dst")"
+    expected="$CONFIG_SRC/$name"
+    [ "$current_target" = "$expected" ] || continue
+    run "rm \"$dst\""
+    echo "unlinked $name"
+  done
+fi

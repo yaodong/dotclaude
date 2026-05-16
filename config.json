@@ -1,0 +1,49 @@
+{
+  "scopes": {
+    "personal": [
+      "brainstorming",
+      "conventional-commit",
+      "converge",
+      "dispatching-parallel-agents",
+      "executing-plans",
+      "finishing-a-development-branch",
+      "jina-reader",
+      "receiving-code-review",
+      "requesting-code-review",
+      "subagent-driven-development",
+      "systematic-debugging",
+      "test-driven-development",
+      "using-git-worktrees",
+      "using-superpowers",
+      "verification-before-completion",
+      "writing-plans",
+      "writing-skills"
+    ],
+    "work": [
+      "bitbucket-pull-requests",
+      "brainstorming",
+      "converge",
+      "dispatching-parallel-agents",
+      "executing-plans",
+      "finishing-a-development-branch",
+      "receiving-code-review",
+      "requesting-code-review",
+      "subagent-driven-development",
+      "systematic-debugging",
+      "test-driven-development",
+      "using-git-worktrees",
+      "using-superpowers",
+      "verification-before-completion",
+      "writing-plans",
+      "writing-skills"
+    ]
+  },
+  "configs": {
+    "personal": [
+      "CLAUDE.md"
+    ],
+    "work": [
+      "CLAUDE.md"
+    ]
+  }
+}

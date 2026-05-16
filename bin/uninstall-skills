@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Remove symlinks at ~/.claude/skills/<name> that point into this repo.
+# Real directories and symlinks pointing elsewhere are left alone.
+#
+# Output: one concise line per skill — unlinked / skipped / not-found.
+#
+# Requires: jq
+#
+# Usage:
+#   bin/uninstall-skills                        remove all symlinks for known skills
+#   bin/uninstall-skills --scope personal       remove only "personal" scope
+#   bin/uninstall-skills --dry-run              preview without changes
+#   bin/uninstall-skills brainstorming foo      remove specific skills
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SKILLS_SRC="$REPO_ROOT/skills"
+SKILLS_DST="$HOME/.claude/skills"
+CONFIG="$REPO_ROOT/config.json"
+
+dry_run=false
+scope=""
+selected=()
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required. Install with: brew install jq" >&2
+  exit 1
+fi
+
+if [ ! -f "$CONFIG" ]; then
+  echo "error: config.json not found at $CONFIG" >&2
+  exit 1
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=true; shift ;;
+    --scope)
+      [ $# -ge 2 ] || { echo "error: --scope requires a name" >&2; exit 2; }
+      scope="$2"; shift 2 ;;
+    -h|--help)
+      sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    -*)
+      echo "unknown flag: $1" >&2; exit 2 ;;
+    *)
+      selected+=("$1"); shift ;;
+  esac
+done
+
+if [ ! -d "$SKILLS_DST" ]; then
+  echo "no skills directory at $SKILLS_DST"
+  exit 0
+fi
+
+targets=()
+if [ "${#selected[@]}" -gt 0 ]; then
+  targets=("${selected[@]}")
+elif [ -n "$scope" ]; then
+  if ! jq -e --arg s "$scope" '.scopes | has($s)' "$CONFIG" >/dev/null; then
+    echo "error: scope '$scope' not in config.json" >&2
+    exit 2
+  fi
+  while IFS= read -r name; do
+    targets+=("$name")
+  done < <(jq -r --arg s "$scope" '.scopes[$s][]' "$CONFIG")
+else
+  while IFS= read -r name; do
+    targets+=("$name")
+  done < <(jq -r '[.scopes[][]] | unique | .[]' "$CONFIG")
+fi
+
+run() {
+  if $dry_run; then
+    echo "  [dry-run] $*"
+  else
+    eval "$@"
+  fi
+}
+
+for name in "${targets[@]}"; do
+  dst="$SKILLS_DST/$name"
+  expected="$SKILLS_SRC/$name"
+
+  if [ ! -L "$dst" ]; then
+    if [ -e "$dst" ]; then
+      echo "skipped  $name (not a symlink)"
+    else
+      echo "absent   $name"
+    fi
+    continue
+  fi
+
+  current_target="$(readlink "$dst")"
+  if [ "$current_target" != "$expected" ]; then
+    echo "skipped  $name (links elsewhere: $current_target)"
+    continue
+  fi
+
+  run "rm \"$dst\""
+  echo "unlinked $name"
+done

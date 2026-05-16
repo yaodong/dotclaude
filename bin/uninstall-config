@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Remove symlinks at ~/.claude/<file> that point into this repo's home/.
+# Real files and symlinks pointing elsewhere are left alone.
+#
+# Output: one concise line per file — unlinked / skipped / absent.
+#
+# Requires: jq
+#
+# Usage:
+#   bin/uninstall-config                        remove all symlinks for known configs
+#   bin/uninstall-config --scope personal       remove only "personal" scope
+#   bin/uninstall-config --dry-run              preview without changes
+#   bin/uninstall-config CLAUDE.md              remove specific files
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CONFIG_SRC="$REPO_ROOT/home"
+CONFIG_DST="$HOME/.claude"
+CONFIG="$REPO_ROOT/config.json"
+
+dry_run=false
+scope=""
+selected=()
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required. Install with: brew install jq" >&2
+  exit 1
+fi
+
+if [ ! -f "$CONFIG" ]; then
+  echo "error: config.json not found at $CONFIG" >&2
+  exit 1
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=true; shift ;;
+    --scope)
+      [ $# -ge 2 ] || { echo "error: --scope requires a name" >&2; exit 2; }
+      scope="$2"; shift 2 ;;
+    -h|--help)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    -*)
+      echo "unknown flag: $1" >&2; exit 2 ;;
+    *)
+      selected+=("$1"); shift ;;
+  esac
+done
+
+if [ ! -d "$CONFIG_DST" ]; then
+  echo "no config directory at $CONFIG_DST"
+  exit 0
+fi
+
+targets=()
+if [ "${#selected[@]}" -gt 0 ]; then
+  targets=("${selected[@]}")
+elif [ -n "$scope" ]; then
+  if ! jq -e --arg s "$scope" '.configs | has($s)' "$CONFIG" >/dev/null; then
+    echo "error: scope '$scope' not in config.json .configs" >&2
+    exit 2
+  fi
+  while IFS= read -r name; do
+    targets+=("$name")
+  done < <(jq -r --arg s "$scope" '.configs[$s][]' "$CONFIG")
+else
+  while IFS= read -r name; do
+    targets+=("$name")
+  done < <(jq -r '[.configs[][]] | unique | .[]' "$CONFIG")
+fi
+
+run() {
+  if $dry_run; then
+    echo "  [dry-run] $*"
+  else
+    eval "$@"
+  fi
+}
+
+for name in "${targets[@]}"; do
+  dst="$CONFIG_DST/$name"
+  expected="$CONFIG_SRC/$name"
+
+  if [ ! -L "$dst" ]; then
+    if [ -e "$dst" ]; then
+      echo "skipped  $name (not a symlink)"
+    else
+      echo "absent   $name"
+    fi
+    continue
+  fi
+
+  current_target="$(readlink "$dst")"
+  if [ "$current_target" != "$expected" ]; then
+    echo "skipped  $name (links elsewhere: $current_target)"
+    continue
+  fi
+
+  run "rm \"$dst\""
+  echo "unlinked $name"
+done

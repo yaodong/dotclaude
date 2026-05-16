@@ -1,0 +1,10 @@
+.DS_Store
+*.skill
+dist/
+
+# Local env / secrets
+.env
+.env.*
+
+# Logs
+*.log

@@ -1,0 +1,15 @@
+[project]
+name = "converge"
+version = "0.1.0"
+description = "Claude Code skill for cross-agent critique loops with Cursor"
+requires-python = ">=3.12"
+dependencies = ["mcp>=1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-mock>=3.12"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Add the parent directory (/tmp/claude/) to sys.path so `from converge import ...`
+# resolves to this package. This is the same path the MCP runtime sets via PYTHONPATH.
+pythonpath = [".."]
